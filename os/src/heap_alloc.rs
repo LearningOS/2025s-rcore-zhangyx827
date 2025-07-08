@@ -24,3 +24,4 @@ pub fn init_heap() {
 pub fn handle_alloc_error(layout: core::alloc::Layout) -> ! {
     panic!("Heap allocation error, layout = {:?}", layout);
 }
+
