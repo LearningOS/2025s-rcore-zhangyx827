@@ -61,5 +61,6 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
             unsafe {COUNTER[current].get_count(id) as isize}
         }
         _ => isize::MAX
+        
     }
 }
