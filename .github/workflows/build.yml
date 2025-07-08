@@ -8,7 +8,7 @@ env:
 
 jobs:
   build-doc:
-    if: github.repository == 'LearningOS/rCore-Camp-Code-2025S'
+    if: github.repository == 'LearningOS/rCore-Tutorial-Code-2025S'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,20 +31,11 @@ jobs:
     container:
       image: duskmoon/dev-env:rcore-ci
     steps:
-      - name: Remove Cargo proxy config
-        run: |
-          unset RUSTUP_DIST_SERVER
-          unset RUSTUP_UPDATE_ROOT
-          unset CARGO_HTTP_MULTIPLEXING
-          # 删除或重置全局配置
-          rm ${CARGO_HOME}/config.toml || true
-          rm -rf rm ${CARGO_HOME}/registry/* || true
       - uses: actions/checkout@v4
       - name: Run tests
         run: |
-          rustup target add riscv64gc-unknown-none-elf
-          rustup target add riscv64gc-unknown-none-elf
           qemu-system-riscv64 --version
+          rustup target add riscv64gc-unknown-none-elf
           git config --global --add safe.directory /__w/${{ github.event.repository.name }}/${{ github.event.repository.name }}
           git clone https://github.com/LearningOS/rCore-Tutorial-Checker-2025S.git ci-user
           git clone https://github.com/LearningOS/rCore-Tutorial-Test-2025S.git ci-user/user
@@ -57,8 +48,23 @@ jobs:
         run: |
           cat output.txt | grep -a "Test passed" | grep -oP "\d{1,}/\d{1,}" | xargs -i echo "points={}"
           cat output.txt | grep -a "Test passed" | grep -oP "\d{1,}/\d{1,}" | xargs -i echo "points={}" >> $GITHUB_OUTPUT
+  gitlab-mirror:
+    if: github.repository == 'LearningOS/rCore-Tutorial-Code-2025S'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - name: Mirror + trigger CI
+      uses: tkf2019/gitlab-mirror-and-ci-action@master
+      with:
+        args: "https://git.tsinghua.edu.cn/os-lab/2025S/public/rcore-tutorial-code-2025S"
+      env:
+        GITLAB_HOSTNAME: "git.tsinghua.edu.cn"
+        GITLAB_PROJECT_ID: "37679"
+        GITLAB_PROJECT_NAME: "rcore-tutorial-code-2025S"
+        GITLAB_PROJECT_TOKEN: ${{secrets.GITLAB_PROJECT_TOKEN}}
+        GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
   deploy:
-    if: github.repository != 'LearningOS/rCore-Camp-Code-2025S'
+    if: github.repository != 'LearningOS/rCore-Tutorial-Code-2025S'
     name: Deploy to pages
     needs: basic-test
     runs-on: ubuntu-latest
@@ -81,39 +87,3 @@ jobs:
           keep_history: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: check score
-        env:
-          course_id: ${{ secrets.RCORE_2025_SPRING_COURSE_ID }}
-          post_api: ${{ secrets.RCORE_2025_SPRING_POST_API }}
-          token: ${{ secrets.RCORE_2025_SPRING_TOKEN }}
-        run: |
-          score=$(( $(grep -o 'ch' classroom/latest.json | wc -l) * 100))
-          cat classroom/latest.json
-          echo $score
-
-          github_user="${{ github.actor }}"
-
-          # 生成 JSON 结果
-          score_json=$(jq -n \
-            --arg channel "github" \
-            --argjson courseId "$course_id" \
-            --arg name "$github_user" \
-            --argjson score "$score" \
-            --argjson totalScore 500 \
-            '{channel: $channel, courseId: $courseId, name: $name, score: $score, totalScore: $totalScore}')
-
-            response=$(curl -X POST $post_api \
-            -H "accept: application/json;charset=utf-8" \
-            -H "Content-Type: application/json" \
-            -H "token: $token" \
-            -d "$score_json" \
-            -v)
-
-            echo "Response: $response"
-
-            if echo "$response" | grep -q '"result":1'; then
-            echo "Success: The result field contains 1."
-            else
-            echo "Error: The result field does not contain 1."
-            exit 1
-            fi
