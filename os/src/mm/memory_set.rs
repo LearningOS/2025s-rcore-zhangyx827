@@ -342,12 +342,13 @@ impl MapArea {
         let mut current_vpn = self.vpn_range.get_start();
         let len = data.len();
         loop {
-            let src = &data[start..len.min(start + PAGE_SIZE)];
+            let src = &data[start..len.min(start + PAGE_SIZE)]; 
             let dst = &mut page_table
                 .translate(current_vpn)
                 .unwrap()
                 .ppn()
                 .get_bytes_array()[..src.len()];
+            // one page per time
             dst.copy_from_slice(src);
             start += PAGE_SIZE;
             if start >= len {

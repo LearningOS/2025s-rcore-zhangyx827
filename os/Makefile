@@ -1,6 +1,6 @@
 # Building
 TARGET := riscv64gc-unknown-none-elf
-MODE := release
+MODE := debug
 KERNEL_ELF := target/$(TARGET)/$(MODE)/os
 KERNEL_BIN := $(KERNEL_ELF).bin
 DISASM_TMP := target/$(TARGET)/$(MODE)/asm
@@ -13,7 +13,7 @@ BOOTLOADER := ../bootloader/$(SBI)-$(BOARD).bin
 
 # Building mode argument
 ifeq ($(MODE), release)
-	MODE_ARG := --release
+	MODE_ARG := 
 endif
 
 # KERNEL ENTRY
@@ -66,7 +66,8 @@ run-inner: build
 		-machine virt \
 		-nographic \
 		-bios $(BOOTLOADER) \
-		-device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA)
+		-device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA) \
+		-s -S
 
 debug: build
 	@tmux new-session -d \
