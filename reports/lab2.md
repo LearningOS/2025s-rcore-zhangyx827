@@ -9,6 +9,9 @@ os/src/mm/page_table.rs 中translated_byte_buffer
 // 通过token得到当前用户的页表
 
 
+// os/src/mm/memory_set.rs中的from_elf中的`from_elf`的实现
+
+
 // 物理内存的随便分配可以通过alloc 实现
 
 // 通过find_pte + ptr.is_valid()判断是不是有效的
