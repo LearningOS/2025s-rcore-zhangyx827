@@ -7,7 +7,7 @@ c
 si 40
 n 6
 si 38
-file ../user/target/riscv64gc-unknown-none-elf/debug/ch4_trace1
+file ../user/target/riscv64gc-unknown-none-elf/debug/ch3_sleep
 si
 b main
 c

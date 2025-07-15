@@ -1,9 +1,11 @@
 //! Process management syscalls
 // use riscv::addr::Page;
 
-use core::intrinsics::size_of;
+// use core::intrinsics::size_of;
 
-use crate::{config::PAGE_SIZE, mm::{frame_alloc, PTEFlags, PageTable, VirtAddr, VirtPageNum, VA_WIDTH_SV39}, task::{change_program_brk, current_user_token, exit_current_and_run_next, suspend_current_and_run_next}};
+// use riscv::addr::Page;
+
+use crate::{config::PAGE_SIZE, mm::{frame_alloc, PTEFlags, PageTable, VirtAddr, VirtPageNum, VA_WIDTH_SV39}, task::{change_program_brk, current_user_token, exit_current_and_run_next, suspend_current_and_run_next}, timer::get_time_us};
 
 #[repr(C)]
 #[derive(Debug)]
@@ -34,7 +36,21 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     let token = current_user_token();  // 得到当前用户的一级页表的token
     let page_table = PageTable::from_token(token); // 得到页表
     let start_va = VirtAddr::from(ts as usize);
-    let end_va = VirtAddr::from(ts as usize + size_of(TimeVal));
+    let vpn = start_va.floor();
+    let ppn = page_table.translate(vpn)
+                                                .unwrap()
+                                                .ppn();
+    let us = get_time_us();
+    let first_offset = start_va.page_offset();
+    let ptr1 = &mut ppn.get_bytes_array()[first_offset];
+    *ptr1 = us / 1_000_000;
+    if (ts as usize + 1) % PAGE_SIZE == 0 {
+        ppn = page_table.translate(VirtPageNum(ts as usize + 1));
+    }
+    let second_offset = VirtAddr::from(ts as usize + 1).page_offset();
+    let ptr2 = &mut ppn.get_bytes_array()[second_offset];
+    *ptr2 = us % 1_000_000;
+    0
 }
 
 /// TODO: Finish sys_trace to pass testcases
