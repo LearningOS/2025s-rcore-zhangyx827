@@ -1,6 +1,8 @@
 //! Process management syscalls
 // use riscv::addr::Page;
 
+use core::intrinsics::size_of;
+
 use crate::{config::PAGE_SIZE, mm::{frame_alloc, PTEFlags, PageTable, VirtAddr, VirtPageNum, VA_WIDTH_SV39}, task::{change_program_brk, current_user_token, exit_current_and_run_next, suspend_current_and_run_next}};
 
 #[repr(C)]
@@ -27,10 +29,12 @@ pub fn sys_yield() -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
-    
-    -1 as isize
+    let token = current_user_token();  // 得到当前用户的一级页表的token
+    let page_table = PageTable::from_token(token); // 得到页表
+    let start_va = VirtAddr::from(ts as usize);
+    let end_va = VirtAddr::from(ts as usize + size_of(TimeVal));
 }
 
 /// TODO: Finish sys_trace to pass testcases

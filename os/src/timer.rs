@@ -21,6 +21,9 @@ pub fn get_time() -> usize {
 #[allow(dead_code)]
 pub fn get_time_ms() -> usize {
     time::read() * MSEC_PER_SEC / CLOCK_FREQ
+    // time::read() 得到几个计数器 ,
+    // 然后 / CLOCK_FREQ 得到经过了几秒
+    // 再换算单位
 }
 
 /// get current time in microseconds
