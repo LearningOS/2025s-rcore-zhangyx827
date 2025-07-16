@@ -1,11 +1,11 @@
 //! Process management syscalls
 // use riscv::addr::Page;
+use alloc::vec;
+use alloc::vec::Vec;
 
-// use core::intrinsics::size_of;
+use core:: mem;
 
-// use riscv::addr::Page;
-
-use crate::{config::PAGE_SIZE, mm::{frame_alloc, PTEFlags, PageTable, VirtAddr, VirtPageNum, VA_WIDTH_SV39}, task::{change_program_brk, current_user_token, exit_current_and_run_next, suspend_current_and_run_next}, timer::get_time_us};
+use crate::{config::PAGE_SIZE, mm::{frame_alloc, FrameTracker, PTEFlags, PageTable, VirtAddr, VirtPageNum, VA_WIDTH_SV39}, task::{change_program_brk, current_pagetable, current_user_token, exit_current_and_run_next, suspend_current_and_run_next, get_count}, timer::get_time_us};
 
 #[repr(C)]
 #[derive(Debug)]
@@ -35,21 +35,28 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
     let token = current_user_token();  // 得到当前用户的一级页表的token
     let page_table = PageTable::from_token(token); // 得到页表
-    let start_va = VirtAddr::from(ts as usize);
-    let vpn = start_va.floor();
-    let ppn = page_table.translate(vpn)
-                                                .unwrap()
-                                                .ppn();
-    let us = get_time_us();
-    let first_offset = start_va.page_offset();
-    let ptr1 = &mut ppn.get_bytes_array()[first_offset];
-    *ptr1 = us / 1_000_000;
-    if (ts as usize + 1) % PAGE_SIZE == 0 {
-        ppn = page_table.translate(VirtPageNum(ts as usize + 1));
-    }
-    let second_offset = VirtAddr::from(ts as usize + 1).page_offset();
-    let ptr2 = &mut ppn.get_bytes_array()[second_offset];
-    *ptr2 = us % 1_000_000;
+    let sec = get_time_us() / 1_000_000;
+    let usec = get_time_us() % 1_000_000;
+    let mut curnum = 0;
+    let bits = mem::size_of::<usize>() * 8;
+
+    for i in 0..bits / 8 {
+        let addr = VirtAddr::from(ts as usize + i);
+        let vpn = addr.floor();
+        let ppn = page_table.translate(vpn).unwrap().ppn();
+        let ptr = &mut ppn.get_bytes_array()[addr.page_offset()];
+        curnum = curnum << 8 | 0b11111111;
+        *ptr = ((sec & curnum) >> i * 8)  as u8;
+    }   
+    
+    for i in 0..bits / 8 {
+        let addr = VirtAddr::from(ts as usize + i + bits / 8);
+        let vpn = addr.floor();
+        let ppn = page_table.translate(vpn).unwrap().ppn();
+        let ptr = &mut ppn.get_bytes_array()[addr.page_offset()];
+        curnum = curnum << 8 | 0b11111111;
+        *ptr = ((usec & curnum) >> i * 8) as u8;
+    }   
     0
 }
 
@@ -96,6 +103,9 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
             *ptr = data as u8;
             return 0;
         }
+        2 => {
+            get_count(id)
+        }
         _ => { return -1 as isize; }
     }
 }
@@ -103,8 +113,8 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
 // YOUR JOB: Implement mmap.
 pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
     trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
-    let token= current_user_token(); // 得到当前用户的地址空间的页表的token
-    let mut page_table = PageTable::from_token(token);  //得到页表
+    // let mut page_table = PageTable::new();
+    let page_table_ptr = current_pagetable();
     let start_va = VirtAddr::from(start);
     if start_va.page_offset() != 0 {
         return -1 as isize;  // start 没有按照页面的大小对齐。
@@ -120,34 +130,74 @@ pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
     let start_vpn = VirtPageNum::from(start_va);
     let end_vpn = VirtPageNum::from(end_va);
     for vpn in start_vpn.0..end_vpn.0 {
-        let op_pte = page_table.translate(VirtPageNum(vpn)); // 通过translate方法查找页表
-        match op_pte {
-            None => {
-                let op_frame = frame_alloc();
-                match op_frame {
-                    None => { return -1 as isize; }   // 物理内存不足
-                    _ => {
-                        let mut pte_flag = PTEFlags::U;   // 增加PTE_U
-                        let frame = op_frame.unwrap();
-                        let ppn = frame.ppn;
-                        let read_bit = prot & 1;
-                        let write_bit = prot & (1 << 1);
-                        let exe_bit = prot & (1 << 2);
-                        if read_bit == 1 {
-                            pte_flag |= PTEFlags::R;
+        unsafe {
+            let op_pte = (*page_table_ptr).translate(VirtPageNum(vpn)); // 通过translate方法查找页表 
+            // 查找看能不能找得到页表项 
+            match op_pte {
+                None => {
+                    let op_frame = frame_alloc();
+                    match op_frame {
+                        None => { return -1 as isize; }   // 物理内存不足
+                        _ => {
+                            let mut pte_flag = PTEFlags::U;   // 增加PTE_U
+                            let frame = op_frame.unwrap();
+                            let ppn = frame.ppn;
+                            let mut v: Vec<FrameTracker> = vec![];
+                            {
+                                let frame2 = frame_alloc();
+                                v.push(frame2.unwrap());
+                            }
+                            //得到最终要映射的物理页号
+                            let read_bit = prot & 1;
+                            let write_bit = prot & (1 << 1);
+                            let exe_bit = prot & (1 << 2);
+                            if read_bit != 0 {
+                                pte_flag |= PTEFlags::R;
+                            }
+                            if write_bit != 0 {
+                                pte_flag |= PTEFlags::W;
+                            }
+                            if exe_bit != 0 {
+                                pte_flag |= PTEFlags::X;
+                            } 
+                            // 这个部分参考了 os/src/mm/memory_set.rs中的from_elf的将LOAD段加载到程序地址空间的实现
+                           (*page_table_ptr).map(VirtPageNum(vpn), ppn, pte_flag);   // 通过查找页表项实现映射，与MapPermission不同
                         }
-                        if write_bit == 1 {
-                            pte_flag |= PTEFlags::W;
-                        }
-                        if exe_bit == 1 {
-                            pte_flag |= PTEFlags::X;
-                        } 
-                        // 这个部分参考了 os/src/mm/memory_set.rs中的from_elf的将LOAD段加载到程序地址空间的实现
-                        page_table.map(VirtPageNum(vpn), ppn, pte_flag);  // 映射的是页表项不是与MapPermission不同
                     }
                 }
+                _ => { 
+                    let pte = op_pte.unwrap();
+                    if pte.is_valid() {
+                        return -1 as isize;    // 被映射过了
+                    }
+                    let op_frame = frame_alloc();
+                    match op_frame {
+                        None => { return -1 as isize; }   // 物理内存不足
+                        _ => {
+                            let mut pte_flag = PTEFlags::U;   // 增加PTE_U
+                            let frame = op_frame.unwrap();
+                            let ppn = frame.ppn; 
+                            //得到最终要映射的物理页号
+                            let read_bit = prot & 1;
+                            let write_bit = prot & (1 << 1);
+                            let exe_bit = prot & (1 << 2);
+                            if read_bit != 0 {
+                                pte_flag |= PTEFlags::R;
+                            }
+                            if write_bit != 0 {
+                                pte_flag |= PTEFlags::W;
+                            }
+                            if exe_bit != 0 {
+                                pte_flag |= PTEFlags::X;
+                            } 
+                            // 这个部分参考了 os/src/mm/memory_set.rs中的from_elf的将LOAD段加载到程序地址空间的实现
+                            (*page_table_ptr).map(VirtPageNum(vpn), ppn, pte_flag);  // 通过查找页表项实现映射，与MapPermission不同
+    
+                        }
+                    }
+    
+                }    
             }
-            _ => { return -1 as isize; }    // 该虚拟页面已经被映射过了
         }
     }
     return 0;
@@ -156,9 +206,11 @@ pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
 // YOUR JOB: Implement munmap.
 pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
-    let token = current_user_token();
-    let mut page_table = PageTable::from_token(token);
+    let page_table_ptr = current_pagetable();
     let mut newlen = len;
+    if start % PAGE_SIZE != 0 {
+        return -1 as isize;
+    }
     if len / PAGE_SIZE != 0 {
         newlen = ((len % PAGE_SIZE) + 1) * PAGE_SIZE;  // 如果没有按照页面的大小对齐 那么向上取整。
     }
@@ -167,15 +219,17 @@ pub fn sys_munmap(start: usize, len: usize) -> isize {
     let start_vpn = VirtPageNum::from(start_va);
     let end_vpn = VirtPageNum::from(end_va);
     for vpn in start_vpn.0..end_vpn.0 {
-        let op_pte = page_table.translate(VirtPageNum(vpn));
-        match op_pte {
-            None => { return -1 as isize; } // 存在没有映射的页面 
-            _ => {
-                let pte = op_pte.unwrap();
-                if !pte.is_valid() {
-                    return -1 as isize; // 这里目前不确定是不是这个呢。
+        unsafe { 
+            let op_pte =  (*page_table_ptr).translate(VirtPageNum(vpn)); 
+            match op_pte {
+                None => { return -1 as isize; } // 存在没有映射的页面 
+                _ => {
+                    let pte = op_pte.unwrap();
+                    if !pte.is_valid() {
+                        return -1 as isize; // 这里目前不确定是不是这个呢。
+                    }
+                    (*page_table_ptr).unmap(VirtPageNum(vpn)); 
                 }
-                page_table.unmap(VirtPageNum(vpn));
             }
         }
     }

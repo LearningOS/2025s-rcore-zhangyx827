@@ -2,7 +2,7 @@
 use super::TaskContext;
 use crate::config::TRAP_CONTEXT_BASE;
 use crate::mm::{
-    kernel_stack_position, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE,
+    kernel_stack_position, MapPermission, MemorySet, PageTable, PhysPageNum, VirtAddr, KERNEL_SPACE
 };
 use crate::trap::{trap_handler, TrapContext};
 
@@ -95,6 +95,10 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+    /// get the pointer of the current pagetable
+    pub fn get_user_page_table(&mut self) -> *mut PageTable {   
+        self.memory_set.get_page_table()
     }
 }
 

@@ -102,6 +102,7 @@ impl PageTable {
         let mut result: Option<&mut PageTableEntry> = None;
         for (i, idx) in idxs.iter().enumerate() {
             let pte = &mut ppn.get_pte_array()[*idx];
+            // 通过当前级次的页表项得到的下一次级次的页表的物理页号再加上idx查找到下一个页表项
             if i == 2 {
                 result = Some(pte);
                 break;
@@ -109,6 +110,7 @@ impl PageTable {
             if !pte.is_valid() {
                 let frame = frame_alloc().unwrap();
                 *pte = PageTableEntry::new(frame.ppn, PTEFlags::V);
+                // 这是表达了下一级页表的物理页的页号
                 self.frames.push(frame);
             }
             ppn = pte.ppn();
@@ -139,6 +141,7 @@ impl PageTable {
         let pte = self.find_pte_create(vpn).unwrap();
         assert!(!pte.is_valid(), "vpn {:?} is mapped before mapping", vpn);
         *pte = PageTableEntry::new(ppn, flags | PTEFlags::V);
+        // 页表项中存储着映射关系
     }
     /// remove the map between virtual page number and physical page number
     #[allow(unused)]

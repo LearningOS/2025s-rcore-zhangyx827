@@ -19,7 +19,10 @@ use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
 use lazy_static::*;
+use crate::syscall::{SYSCALL_EXIT, SYSCALL_GET_TIME, SYSCALL_MMAP, SYSCALL_MUNMAP, SYSCALL_SBRK, SYSCALL_TRACE, SYSCALL_WRITE, SYSCALL_YIELD};
+
 use switch::__switch;
+use crate::mm::PageTable;
 pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
@@ -40,12 +43,39 @@ pub struct TaskManager {
     inner: UPSafeCell<TaskManagerInner>,
 }
 
+struct CntSys {
+    cnt_write: isize,
+    cnt_exit: isize,
+    cnt_gettime: isize,
+    cnt_yield: isize,
+    cnt_trace: isize,
+    cnt_mmap: isize,
+    cnt_munmap: isize,
+    cnt_sbrk: isize
+}
+
+impl CntSys {
+    pub fn new() -> Self {
+        Self {
+            cnt_write: 0,
+            cnt_exit: 0,
+            cnt_gettime: 0,
+            cnt_yield: 0,
+            cnt_trace: 0,
+            cnt_mmap: 0,
+            cnt_munmap: 0,
+            cnt_sbrk: 0
+        }
+    }
+}
+
 /// The task manager inner in 'UPSafeCell'
 struct TaskManagerInner {
     /// task list
     tasks: Vec<TaskControlBlock>,
+    cnts: Vec<CntSys>,
     /// id of current `Running` task
-    current_task: usize,
+    current_task: usize
 }
 
 lazy_static! {
@@ -55,14 +85,17 @@ lazy_static! {
         let num_app = get_num_app();
         println!("num_app = {}", num_app);
         let mut tasks: Vec<TaskControlBlock> = Vec::new();
+        let mut cnts: Vec<CntSys> =  Vec::new();
         for i in 0..num_app {
             tasks.push(TaskControlBlock::new(get_app_data(i), i));
+            cnts.push(CntSys::new());
         }
         TaskManager {
             num_app,
             inner: unsafe {
                 UPSafeCell::new(TaskManagerInner {
                     tasks,
+                    cnts,
                     current_task: 0,
                 })
             },
@@ -120,19 +153,14 @@ impl TaskManager {
         inner.tasks[inner.current_task].get_user_token()
     }
 
-    /// Get the current 'Running' task's trap contexts.
-    fn get_current_trap_cx(&self) -> &'static mut TrapContext {
-        let inner = self.inner.exclusive_access();
-        inner.tasks[inner.current_task].get_trap_cx()
-    }
-
+    
     /// Change the current 'Running' task's program break
     pub fn change_current_program_brk(&self, size: i32) -> Option<usize> {
         let mut inner = self.inner.exclusive_access();
         let cur = inner.current_task;
         inner.tasks[cur].change_program_brk(size)
     }
-
+    
     /// Switch current `Running` task to the task we have found,
     /// or there is no `Ready` task and we can exit with all applications completed
     fn run_next_task(&self) {
@@ -153,6 +181,49 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+    /// Get the current 'Running' task's trap contexts.
+    fn get_current_trap_cx(&self) -> &'static mut TrapContext {
+        let inner = self.inner.exclusive_access();
+        inner.tasks[inner.current_task].get_trap_cx()
+    }
+    /// get the pointer of current page_table 
+    pub fn current_pagetable(&self) -> *mut PageTable{
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        let page_table = inner.tasks[cur].get_user_page_table();
+        page_table
+    }
+    fn modify_cnt(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        match syscall_id {
+            SYSCALL_WRITE => inner.cnts[cur].cnt_write += 1,
+            SYSCALL_EXIT => inner.cnts[cur].cnt_exit += 1,
+            SYSCALL_YIELD =>inner.cnts[cur].cnt_yield += 1,
+            SYSCALL_GET_TIME => inner.cnts[cur].cnt_gettime += 1,
+            SYSCALL_TRACE => inner.cnts[cur].cnt_trace += 1,
+            SYSCALL_MMAP => inner.cnts[cur].cnt_mmap += 1,
+            SYSCALL_MUNMAP => inner.cnts[cur].cnt_munmap += 1,
+            SYSCALL_SBRK => inner.cnts[cur].cnt_sbrk += 1,
+            _ => {}
+        }
+    }
+    fn get_count(&self, syscall_id: usize) -> isize {
+        let inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        match syscall_id {
+            SYSCALL_WRITE =>  inner.cnts[cur].cnt_write,
+            SYSCALL_EXIT => inner.cnts[cur].cnt_exit, 
+            SYSCALL_YIELD =>inner.cnts[cur].cnt_yield, 
+            SYSCALL_GET_TIME => inner.cnts[cur].cnt_gettime, 
+            SYSCALL_TRACE => inner.cnts[cur].cnt_trace, 
+            SYSCALL_MMAP => inner.cnts[cur].cnt_mmap,
+            SYSCALL_MUNMAP => inner.cnts[cur].cnt_munmap, 
+            SYSCALL_SBRK => inner.cnts[cur].cnt_sbrk, 
+            _ => { -1 as isize }
+        }
+    }
+
 }
 
 /// Run the first task in task list.
@@ -201,4 +272,18 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+/// get the pointer of the current pagetable
+pub fn current_pagetable() -> *mut PageTable {
+    TASK_MANAGER.current_pagetable()
+}
+
+/// modify the syscall count of the current task
+pub fn modify_cnt(syscall_id: usize) {
+    TASK_MANAGER.modify_cnt(syscall_id);
+}
+
+/// get the syscall count of the current task
+pub fn get_count(syscall_id: usize) -> isize{
+    TASK_MANAGER.get_count(syscall_id)
 }

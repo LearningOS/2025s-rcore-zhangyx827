@@ -40,6 +40,10 @@ pub struct MemorySet {
 }
 
 impl MemorySet {
+    /// Get the PageTable
+    pub fn get_page_table(&mut self) ->  *mut PageTable {
+        &mut self.page_table as *mut PageTable
+    }
     /// Create a new empty `MemorySet`.
     pub fn new_bare() -> Self {
         Self {
