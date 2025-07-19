@@ -300,6 +300,10 @@ impl MemorySet {
             false
         }
     }
+    /// get page pointer of the pagetable
+    pub fn get_page_table_ptr(&mut self) -> *mut PageTable {
+        &mut self.page_table as *mut PageTable
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {

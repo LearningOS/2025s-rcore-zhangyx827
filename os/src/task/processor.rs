@@ -9,6 +9,7 @@ use super::{fetch_task, TaskStatus};
 use super::{TaskContext, TaskControlBlock};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
+use crate::mm::PageTable;
 use alloc::sync::Arc;
 use lazy_static::*;
 
@@ -109,4 +110,10 @@ pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     unsafe {
         __switch(switched_task_cx_ptr, idle_task_cx_ptr);
     }
+}
+
+/// get the pointer of the current pagetable
+pub fn current_pagetable_ptr() -> *mut PageTable {
+    let task = current_task().unwrap();
+    task.get_page_table_ptr()
 }

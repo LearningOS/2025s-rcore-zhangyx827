@@ -48,7 +48,7 @@ __restore:
     # switch to user space
     csrw satp, a1
     sfence.vma
-    csrw sscratch, a0
+    csrw sscratch, a0   #the first time that the sscratch is set, it will be used in the __alltraps to get the addr of the trap context ptr in user space
     mv sp, a0
     # now sp points to TrapContext in user space, start restoring based on it
     # restore sstatus/sepc

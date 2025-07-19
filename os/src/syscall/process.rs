@@ -1,13 +1,19 @@
 //! Process management syscalls
+use core::mem;
+use crate::mm::address::StepByOne;
 use alloc::sync::Arc;
-
+use crate::config::PAGE_SIZE;
+use crate::mm::{frame_alloc, PTEFlags, PageTable, VirtAddr, VirtPageNum};
+use crate::timer::get_time_us;
+use crate::task::{current_pagetable_ptr, TaskControlBlock};
 use crate::{
     loader::get_app_data_by_name,
     mm::{translated_refmut, translated_str},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
         suspend_current_and_run_next,
-    },
+    }, 
+    // timer::get_time_us,
 };
 
 #[repr(C)]
@@ -105,30 +111,159 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let us = get_time_us();
+    let mut va = ts as usize;
+    let size = mem::size_of::<usize>();
+    let token = current_user_token();
+    let mut bits = 0b11111111;
+    let sec = us / 1_000_000;
+    let usec = us % 1_000_000;
+    // println!("sec is {} and usec is {} in kernel\n", sec, usec);
+    for i in 0..size {
+        let ptr: &'static mut u8 = translated_refmut(token, va as *mut u8);
+        *ptr = ((sec & bits) >> (i * 8)) as u8;
+        // println!("*ptr of {} is {}\n",i, *ptr);
+        bits = bits << 8 | 0b11111111;
+        va += 1;
+    }
+    bits = 0b11111111;
+    for i in 0..size {
+        let ptr: &'static mut u8 = translated_refmut(token, va as *mut u8);
+        *ptr = ((usec & bits) >> (i * 8)) as u8;
+        bits = bits << 8 | 0b11111111;
+        va += 1;
+    }
+    return 0;
 }
 
 /// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let page_table_ptr: *mut PageTable  = current_pagetable_ptr();
+    if start % PAGE_SIZE != 0 {
+        return -1 as isize;
+    }
+    if ((prot & !0x7) != 0) || (prot & 0x7 == 0) {
+        print!("1!!!!!!!!!!!!!!!!!\n");
+        return -1 as isize;
+    }
+    let mut newlen = len;
+    if len % PAGE_SIZE != 0 {
+        newlen = (len / PAGE_SIZE + 1) * PAGE_SIZE;
+    }
+    let va_start = VirtAddr::from(start);
+    let mut vpn: VirtPageNum = va_start.into();
+    for _ in 0.. newlen / PAGE_SIZE {
+        unsafe {
+            let opt_pte = (*page_table_ptr).find_pte(vpn);
+            match opt_pte {
+                None => { 
+                    let opt_frame = frame_alloc();
+                    match opt_frame {
+                        None => { 
+                            print!("2!!!!!!!!!!!!!!!!!\n");
+                            return -1 as isize; 
+                        }
+                        _ => {
+                            let frame = opt_frame.unwrap();
+                            let mut pte_flag = PTEFlags::U;
+                            let read_bit = prot & 1;
+                            let write_bit = prot & (1 << 1);
+                            let exe_bit = prot & (1 << 2);
+                            if read_bit != 0 {
+                                pte_flag |= PTEFlags::R;
+                            }
+                            if write_bit != 0 {
+                                pte_flag |= PTEFlags::W;
+                            }
+                            if exe_bit != 0 {
+                                pte_flag |= PTEFlags::X;
+                            } 
+                            (*page_table_ptr).map(vpn, frame.ppn, pte_flag);
+                        }
+                    }
+                }
+                _ => {
+                    let pte = opt_pte.unwrap();
+                    if pte.is_valid() {
+                        print!("3!!!!!!!!!!!!!!!!!\n");
+                        return -1 as isize;
+                    }
+                    let opt_frame = frame_alloc();
+                    match opt_frame {
+                        None => { 
+                            print!("4!!!!!!!!!!!!!!!!!\n");
+                            return -1 as isize; 
+                        }
+                        _ => {
+                            let frame = opt_frame.unwrap();
+                            let mut pte_flag = PTEFlags::U;
+                            let read_bit = prot & 1;
+                            let write_bit = prot & (1 << 1);
+                            let exe_bit = prot & (1 << 2);
+                            if read_bit != 0 {
+                                pte_flag |= PTEFlags::R;
+                            }
+                            if write_bit != 0 {
+                                pte_flag |= PTEFlags::W;
+                            }
+                            if exe_bit != 0 {
+                                pte_flag |= PTEFlags::X;
+                            } 
+                            (*page_table_ptr).map(vpn, frame.ppn, pte_flag);
+                        }
+                    }
+                }
+            }
+        }
+        vpn.step();
+    }
+    0
 }
 
 /// YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let page_table_ptr: *mut PageTable  = current_pagetable_ptr();
+    if start % PAGE_SIZE != 0 {
+        return -1 as isize;
+    }
+    let mut newlen = len;
+    if len % PAGE_SIZE != 0 {
+        newlen = (len / PAGE_SIZE + 1) * PAGE_SIZE;
+    }
+    let va_start = VirtAddr::from(start);
+    let mut vpn: VirtPageNum = va_start.into();
+    for _ in 0.. newlen / PAGE_SIZE {
+        unsafe {
+            let opt_pte = (*page_table_ptr).find_pte(vpn);
+            match opt_pte {
+                None => { 
+                    return -1 as isize;
+                }
+                _ => {
+                    let pte = opt_pte.unwrap();
+                    if !pte.is_valid() {
+                        return -1 as isize;
+                    }
+                    (*page_table_ptr).unmap(vpn);
+                }
+            }
+        }
+        vpn.step();
+    }
+    0
 }
 
 /// change data segment size
@@ -143,19 +278,38 @@ pub fn sys_sbrk(size: i32) -> isize {
 
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
-pub fn sys_spawn(_path: *const u8) -> isize {
+pub fn sys_spawn(path: *const u8) -> isize {
     trace!(
         "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let token = current_user_token();
+    let file_name = translated_str(token, path);
+    if let Some(data) = get_app_data_by_name(file_name.as_str()) {
+        let child_task = TaskControlBlock::new(data);
+        let parent_task = current_task().unwrap();
+        child_task.inner_exclusive_access().parent = Some(Arc::downgrade(&parent_task));    // 参考了task/task.rs中fork的实现
+        let child_pid = child_task.pid.0 as isize;
+        let wrapper = Arc::new(child_task);
+        parent_task.inner_exclusive_access().children.push(wrapper.clone());
+        add_task(wrapper.clone());   // 加入到调度队列当中
+        return child_pid;
+    } else {
+        return -1 as isize;
+    }
 }
 
 // YOUR JOB: Set task priority.
-pub fn sys_set_priority(_prio: isize) -> isize {
+pub fn sys_set_priority(prio: isize) -> isize {
     trace!(
         "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    if prio <= 1 {
+        return -1
+    } else {
+        let current_task = current_task().unwrap();
+        current_task.inner_exclusive_access().priority = prio;
+        prio
+    }
 }

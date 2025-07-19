@@ -6,7 +6,6 @@ use crate::sync::UPSafeCell;
 use alloc::vec::Vec;
 use core::fmt::{self, Debug, Formatter};
 use lazy_static::*;
-
 /// tracker for physical page frame allocation and deallocation
 pub struct FrameTracker {
     /// physical page number
