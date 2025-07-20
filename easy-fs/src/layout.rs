@@ -424,7 +424,8 @@ impl DirEntry {
     }
     /// Get name of the entry
     pub fn name(&self) -> &str {
-        let len = (0usize..).find(|i| self.name[*i] == 0).unwrap();
+        let len = (0usize..).find(|i| self.name[*i] == 0)
+        .unwrap();
         core::str::from_utf8(&self.name[..len]).unwrap()
     }
     /// Get inode number of the entry
