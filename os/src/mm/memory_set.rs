@@ -36,6 +36,7 @@ pub fn kernel_token() -> usize {
     KERNEL_SPACE.exclusive_access().token()
 }
 
+
 /// address space
 pub struct MemorySet {
     page_table: PageTable,
@@ -288,7 +289,10 @@ impl MemorySet {
     pub fn recycle_data_pages(&mut self) {
         self.areas.clear();
     }
-
+    /// get the pagetable pointer 
+    pub fn page_table_ptr(&mut self) -> *mut PageTable {
+        &mut self.page_table as *mut PageTable
+    }
     /// shrink the area to new_end
     #[allow(unused)]
     pub fn shrink_to(&mut self, start: VirtAddr, new_end: VirtAddr) -> bool {
@@ -318,6 +322,7 @@ impl MemorySet {
             false
         }
     }
+
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
@@ -418,6 +423,7 @@ impl MapArea {
             current_vpn.step();
         }
     }
+
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]

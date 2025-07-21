@@ -3,7 +3,7 @@ use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT_BASE;
 use crate::fs::{File, Stdin, Stdout};
-use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE, PageTable};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
@@ -71,6 +71,8 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+    /// priority
+    pub priority: isize,
 }
 
 impl TaskControlBlockInner {
@@ -93,6 +95,9 @@ impl TaskControlBlockInner {
             self.fd_table.push(None);
             self.fd_table.len() - 1
         }
+    }
+    pub fn page_table_ptr(&mut self) -> *mut PageTable {
+        self.memory_set.page_table_ptr()
     }
 }
 
@@ -135,6 +140,7 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    priority: 16,
                 })
             },
         };
@@ -216,6 +222,7 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    priority: parent_inner.priority,
                 })
             },
         });
@@ -261,6 +268,7 @@ impl TaskControlBlock {
             None
         }
     }
+
 }
 
 #[derive(Copy, Clone, PartialEq)]

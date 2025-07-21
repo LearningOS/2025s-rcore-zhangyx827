@@ -5,7 +5,7 @@
 //! `UPSafeCell<OSInodeInner>` -> `OSInode`: for static `ROOT_INODE`,we
 //! need to wrap `OSInodeInner` into `UPSafeCell`
 use super::File;
-use crate::drivers::BLOCK_DEVICE;
+use crate::{drivers::BLOCK_DEVICE, fs::StatMode};
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
 use alloc::sync::Arc;
@@ -13,7 +13,7 @@ use alloc::vec::Vec;
 use bitflags::*;
 use easy_fs::{EasyFileSystem, Inode};
 use lazy_static::*;
-
+use super::Stat;
 /// inode in memory
 /// A wrapper around a filesystem inode
 /// to implement File trait atop
@@ -116,7 +116,8 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
                 .map(|inode| Arc::new(OSInode::new(readable, writable, inode)))
         }
     } else {
-        ROOT_INODE.find(name).map(|inode| {
+        ROOT_INODE.find(name)
+        .map(|inode| {
             if flags.contains(OpenFlags::TRUNC) {
                 inode.clear();
             }
@@ -156,4 +157,34 @@ impl File for OSInode {
         }
         total_write_size
     }
+    fn stat(&self) -> super::Stat {
+        let inner = self.inner.exclusive_access();
+        let nlink = inner.inode.nlink_num();
+        let inode_id = inner.inode.get_inode_id();
+        let mode = match inner.inode.get_type() {
+            0 => StatMode::DIR,
+            1 => StatMode::FILE,
+            _ => StatMode::NULL,
+        };
+        // debug!("the nlink in function counted is  ><><><>>< {}", {nlink});
+        Stat {
+            dev: 0,
+            ino: inode_id,
+            mode: mode,
+            nlink: nlink,
+            pad: [0; 7],
+        }
+    }
 }
+/// find a inode from the root dir
+pub fn find(name: &str) -> Option<Arc<Inode>> {
+   ROOT_INODE.find(name) 
+}
+/// add a dirent with based on the name1
+pub fn add_dirent(name1: &str, name2: &str) {
+    ROOT_INODE.add_dirent(name1, name2);
+}
+/// delete a dirent
+pub fn delete_dirent(name: &str) {{
+    ROOT_INODE.delete_dirent(name);
+}}

@@ -9,6 +9,7 @@ use super::{fetch_task, TaskStatus};
 use super::{TaskContext, TaskControlBlock};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
+use crate::mm::PageTable;
 use alloc::sync::Arc;
 use lazy_static::*;
 
@@ -99,7 +100,12 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
         .inner_exclusive_access()
         .get_trap_cx()
 }
-
+/// Get the pagetable pointer of current process
+pub fn current_pagetable_ptr() -> *mut PageTable {
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    inner.memory_set.page_table_ptr()
+}
 ///Return to idle control flow for new scheduling
 pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     let mut processor = PROCESSOR.exclusive_access();

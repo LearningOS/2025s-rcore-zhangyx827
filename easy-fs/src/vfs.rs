@@ -4,6 +4,7 @@ use super::{
 };
 use alloc::string::String;
 use alloc::sync::Arc;
+use log::debug;
 use alloc::vec::Vec;
 use spin::{Mutex, MutexGuard};
 /// Virtual filesystem layer over easy-fs
@@ -173,15 +174,116 @@ impl Inode {
     }
     /// Clear the data in current inode
     pub fn clear(&self) {
+        debug!("before lock!\n");
         let mut fs = self.fs.lock();
+        debug!("after lock!\n");
         self.modify_disk_inode(|disk_inode| {
             let size = disk_inode.size;
             let data_blocks_dealloc = disk_inode.clear_size(&self.block_device);
             assert!(data_blocks_dealloc.len() == DiskInode::total_blocks(size) as usize);
+            debug!("before dealloc!");
             for data_block in data_blocks_dealloc.into_iter() {
                 fs.dealloc_data(data_block);
             }
+            debug!("after dealloc!");
         });
+        debug!("before sync!");
         block_cache_sync_all();
+        debug!("after sync!");
+    }
+    /// get nlink_num of the inode
+    pub fn nlink_num(&self) -> u32 {
+        let _fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| disk_inode.nlink)
+    }
+    /// add the nlink_num of the inode
+    // pub fn add_nlink_num(&self) {
+    //     let _fs = self.fs.lock();
+    //     self.modify_disk_inode(|disk_inode| disk_inode.nlink += 1;);
+    // }
+    /// sub the nlink_num of the inode
+    // pub fn sub_nlink_num(&self) {
+    //     let _fs = self.fs.lock();
+    //     self.modify_disk_inode(|disk_inode| disk_inode.nlink -= 1;);
+    // }
+    /// get the type of the inode
+    pub fn get_type(&self) -> u8 {
+        let _fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| {
+            if disk_inode.is_dir() {
+                return 0;
+            } else {
+                return 1;
+            }
+        })
+    }
+    /// add a dirent
+    pub fn add_dirent(&self, name1: &str, name2: &str) {
+        let inode = self.find(name1).unwrap();
+        let mut fs = self.fs.lock();
+        let inode_id = self.read_disk_inode(|disk_inode| {
+            self.find_inode_id(name1, disk_inode).unwrap()
+        });
+        self.modify_disk_inode(|root_inode| {
+        let file_count = (root_inode.size as usize) / DIRENT_SZ;
+        let new_size = (file_count + 1) * DIRENT_SZ;
+        // append file in the dirent
+        // increase size
+        self.increase_size(new_size as u32, root_inode, &mut fs);
+        // write dirent
+        let dirent = DirEntry::new(name2, inode_id);
+        root_inode.write_at(
+            file_count * DIRENT_SZ,
+            dirent.as_bytes(),
+            &self.block_device,
+        );
+        });
+        inode.modify_disk_inode(|disk_node| { disk_node.nlink += 1; });
+        block_cache_sync_all();
+        // 这部分参考了 vfs.rs 中create的实现
+    }   
+    /// deltete a dirent
+    pub fn delete_dirent(&self, name: &str) {
+        debug!("before find!\n");
+        let inode = self.find(name).unwrap();
+        debug!("after find!\n");
+        let mut _fs = self.fs.lock();
+        let mut flag = 0;
+        self.modify_disk_inode(|disk_inode| {
+            let mut dirent = DirEntry::empty();
+            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+            for i in 0..file_count {
+                assert_eq!(
+                    disk_inode.read_at(DIRENT_SZ * i, dirent.as_bytes_mut(), &self.block_device,),
+                    DIRENT_SZ,
+                );
+                if dirent.name() == name {
+                    // let inode_id = dirent.inode_id();
+                    // let (block_id, block_offset) = fs.get_disk_inode_pos(inode_id);
+                    // get_block_cache(block_id, Arc::clone(&self.block_device))
+                    // .lock()
+                    // .modify(block_offset, |disk_inode: &DiskInode| {
+                    //     disk_inode.nlink -= 1;
+                    // })
+                    disk_inode.write_at(DIRENT_SZ * i, DirEntry::empty().as_bytes(), &self.block_device,);
+                    inode.modify_disk_inode(|disk_inode| {
+                        disk_inode.nlink -= 1;
+                        if disk_inode.nlink == 0 {
+                            flag = 1;
+                        } 
+                    });
+                    break;
+                }
+            }               
+        });
+        if flag == 1 {
+            drop(_fs);
+            inode.clear();
+        }
+        // 参考了vfs.rs find_inode_id的实现
+    }
+    /// get inode id
+    pub fn get_inode_id(&self) -> u64 {
+        self.fs.lock().get_inode_id(self.block_id, self.block_offset)
     }
 }
