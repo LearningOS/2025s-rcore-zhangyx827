@@ -58,7 +58,8 @@ pub fn fetch_task() -> Option<Arc<TaskControlBlock>> {
 /// Get process by pid
 pub fn pid2task(pid: usize) -> Option<Arc<TaskControlBlock>> {
     let map = PID2TCB.exclusive_access();
-    map.get(&pid).map(Arc::clone)
+    map.get(&pid)
+    .map(Arc::clone)
 }
 
 /// Remove item(pid, _some_pcb) from PDI2PCB map (called by exit_current_and_run_next)
